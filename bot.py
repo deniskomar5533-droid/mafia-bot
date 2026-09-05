@@ -7,65 +7,18 @@ from telebot import types
 TOKEN = "8429089487:AAH_jKSvYpoPaD_RTqA6wSh5SynasROZtKo"
 bot = telebot.TeleBot(TOKEN)
 
-# --- ИМЕНА И СЛЕНГ ДЛЯ УМНЫХ ИИ-БОТОВ ---
-AI_NAMES = [
-    "Тимур",
-    "Артём",
-    "Данил",
-    "Максим",
-    "София",
-    "Кирилл",
-    "Вадим",
-    "Алина",
-    "Илья",
-    "Никита",
-    "Дима",
-    "Оля",
-    "Влад",
-    "Егор",
-    "Маша",
-    "Саша",
-]
-
-SLANG_RESPONSES = {
-    "suspicious": [
-        "Мутный базар, {target}... Где пруфы, что ты мирный?",
-        "{target} жестко суетит, это не хисам халяль ни разу ❌",
-        "Давайте сливать {target}, он на мафии чисто коч устраивает!",
-        "{target}, ты че голду на деф тратишь? Признавайся, кто ты!",
-    ],
-    "defense": [
-        "Ребята, я чисто мирный, хисам халяль 100%! Не суетите!",
-        "За что наезд? Я даже голду не забирал, вы че!",
-        "Че за коч вы устроили? Где логика? Я мирный житель!",
-        "Кто против меня голосует — тот мафия без пруфов!",
-    ],
-    "agreement": [
-        "Факты говоришь, {target}! Поддерживаю, сливаем мафию.",
-        "{target} чисто базы выдал, хисам халяль тема 🔥",
-        "Согласен с {target}, тут всё предельно ясно.",
-    ],
-    "random_chat": [
-        "Че за тишина? Кто тут мафия, признавайтесь за голду 😂",
-        "Шериф, дай чек по халялю, кого проверял?",
-        "Давайте без коча, просто сливаем самого тихаря.",
-        "Реально, у кого какая роль? Напишите хоть в лс...",
-    ],
-}
-
-# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ЛОББИ ---
 lobby_active = False
 lobby_timer = 0
 lobby_chat_id = None
 lobby_message_id = None
-timer_thread = None
 host_id = None
 roles_menu_open = False  # Блокировка обновления экрана при настройке ролей
 
-players = {}  # ID -> {name, is_ai, role, alive, will}
+players = {}  # ID -> {name, role, alive, will}
 game_started = False
-ai_bot_count = 0
 
+# Все 17 ролей
 DEFAULT_ROLES = {
     "Мафия": 1,
     "Подставной": 0,
@@ -91,93 +44,14 @@ selected_roles = DEFAULT_ROLES.copy()
 
 def setup_bot_commands():
   commands = [
-      telebot.types.BotCommand("lobby", "⚔️ Обычное лобби (люди)"),
-      telebot.types.BotCommand("ai_lobby", "🤖 Игра с умными ИИ-ботами"),
-      telebot.types.BotCommand("help_roles", "📖 Описание 17 ролей"),
+      telebot.types.BotCommand("lobby", "⚔️ Создать лобби мафии"),
+      telebot.types.BotCommand("reset", "🔄 Сбросить зависшую игру"),
       telebot.types.BotCommand("roles", "📜 Список участников"),
       telebot.types.BotCommand("will", "✉️ Написать завещание"),
-      telebot.types.BotCommand("stats", "👤 Мой профиль"),
       telebot.types.BotCommand("ping", "🟢 Проверка бота"),
   ]
   try:
     bot.set_my_commands(commands)
-  except Exception:
-    pass
-
-
-def get_ai_setup_keyboard():
-  markup = types.InlineKeyboardMarkup(row_width=4)
-  btns = [
-      types.InlineKeyboardButton(f"{i} ИИ", callback_data=f"set_ai_{i}")
-      for i in range(1, 9)
-  ]
-  markup.add(*btns)
-  markup.add(
-      types.InlineKeyboardButton("⚙️ 12 ИИ-ботов", callback_data="set_ai_12"),
-      types.InlineKeyboardButton("🔥 15 ИИ-ботов", callback_data="set_ai_15"),
-  )
-  return markup
-
-
-def generate_ai_bots(count):
-  global players
-  used_names = random.sample(AI_NAMES, min(count, len(AI_NAMES)))
-
-  for idx in range(count):
-    bot_id = f"ai_bot_{idx+1}"
-    bot_name = f"🤖 #{idx+1} {used_names[idx]}"
-    players[bot_id] = {
-        "name": bot_name,
-        "is_ai": True,
-        "role": None,
-        "alive": True,
-        "will": "Чисто по халялю играл...",
-    }
-
-
-def bot_respond_to_message(user_name, text, chat_id):
-  if not game_started:
-    return
-
-  alive_bots = [p for p in players.values() if p.get("is_ai") and p["alive"]]
-  alive_others = [
-      p["name"] for p in players.values() if p["alive"] and p["name"] != user_name
-  ]
-
-  if not alive_bots:
-    return
-
-  responder = random.choice(alive_bots)
-  if responder["name"] == user_name:
-    return
-
-  msg_lower = text.lower()
-  target = (
-      random.choice(alive_others) if alive_others else "кто-то из присутствующих"
-  )
-
-  if any(
-      word in msg_lower
-      for word in ["мафия", "шериф", "доктор", "кто", "где", "почему", "за что"]
-  ):
-    category = "suspicious"
-  elif any(
-      word in msg_lower for word in ["мирный", "халяль", "деф", "пруф", "голда"]
-  ):
-    category = "agreement"
-  else:
-    category = random.choice(["suspicious", "defense", "random_chat"])
-
-  phrase_template = random.choice(SLANG_RESPONSES[category])
-  reply_text = phrase_template.format(target=user_name)
-
-  time.sleep(random.uniform(1.2, 2.5))
-  try:
-    bot.send_message(
-        chat_id,
-        f"💬 **{responder['name']}**: {reply_text}",
-        parse_mode="Markdown",
-    )
   except Exception:
     pass
 
@@ -218,7 +92,6 @@ def get_roles_setup_keyboard():
 def update_lobby_message():
   global lobby_active, lobby_timer, lobby_chat_id, lobby_message_id, roles_menu_open
 
-  # Если открыто меню настройки ролей, НЕ перерисовываем главное окно!
   if not lobby_active or not lobby_message_id or roles_menu_open:
     return
 
@@ -237,7 +110,7 @@ def update_lobby_message():
       "🏙 **ИГРОВОЕ ЛОББИ (MAFIA TOWN)**\n"
       "───────────────────────\n"
       f"⏳ **Время:** `{mins:02d}:{secs:02d}` | 👥 **Участников:**"
-      f" `{len(players)}` (ИИ: {ai_bot_count})\n"
+      f" `{len(players)}`\n"
       f"⚙️ **Роли:** _{r_summary}_\n\n"
       f"**Состав:**\n{p_list}"
   )
@@ -259,12 +132,15 @@ def start_game():
   total_roles = sum(selected_roles.values())
 
   if total_roles != len(players):
-    bot.send_message(
-        lobby_chat_id,
-        f"❌ **Ошибка баланса!** Карт ролей ({total_roles}) != участников"
-        f" ({len(players)}).",
-        parse_mode="Markdown",
-    )
+    try:
+      bot.send_message(
+          lobby_chat_id,
+          f"❌ **Ошибка баланса!** Карт ролей ({total_roles}) != участников"
+          f" ({len(players)}). Настройте роли под количество игроков!",
+          parse_mode="Markdown",
+      )
+    except Exception:
+      pass
     return
 
   game_started = True
@@ -280,96 +156,48 @@ def start_game():
     pdata["role"] = role
     pdata["alive"] = True
 
-    if not pdata.get("is_ai"):
-      try:
-        bot.send_message(
-            uid,
-            f"🎭 **ИГРА НАЧАЛАСЬ!**\n\nТвоя роль: **{role}**",
-            parse_mode="Markdown",
-        )
-      except Exception:
-        pass
+    try:
+      bot.send_message(
+          uid,
+          f"🎭 **ИГРА НАЧАЛАСЬ!**\n\nТвоя секретная роль: **{role}**",
+          parse_mode="Markdown",
+      )
+    except Exception:
+      pass
 
-  bot.send_message(
-      lobby_chat_id,
-      "🔥 **Игра началась!** Боты готовы к обсуждению!",
-      parse_mode="Markdown",
-  )
-
-
-# --- ОБРАБОТЧИК СООБЩЕНИЙ ---
-
-
-@bot.message_handler(
-    func=lambda message: game_started and not message.text.startswith("/")
-)
-def handle_chat_discussion(message):
-  threading.Thread(
-      target=bot_respond_to_message,
-      args=(message.from_user.first_name, message.text, message.chat.id),
-  ).start()
+  try:
+    bot.send_message(
+        lobby_chat_id,
+        "🔥 **Игра началась!** Роли успешно распределены в личные сообщения"
+        " участникам.",
+        parse_mode="Markdown",
+    )
+  except Exception:
+    pass
 
 
 # --- КОМАНДЫ ---
 
 
-@bot.message_handler(commands=["ai_lobby"])
-def cmd_ai_lobby(message):
-  global lobby_active, lobby_timer, lobby_chat_id, lobby_message_id, players, host_id, selected_roles, game_started
-
-  if game_started or lobby_active:
-    bot.reply_to(message, "⚠️ Игра уже идёт!")
-    return
-
-  players = {message.from_user.id: {"name": message.from_user.first_name}}
-  selected_roles = DEFAULT_ROLES.copy()
-  host_id = message.from_user.id
-  lobby_active = True
-  lobby_timer = 300
-  lobby_chat_id = message.chat.id
-
-  bot.send_message(
-      message.chat.id,
-      "🤖 **РЕЖИМ С ИИ-БОТАМИ**\nВыберите сколько ботов добавить:",
-      reply_markup=get_ai_setup_keyboard(),
-  )
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("set_ai_"))
-def handle_ai_count(call):
-  global ai_bot_count, lobby_message_id
-  try:
-    bot.answer_callback_query(call.id)
-  except Exception:
-    pass
-
-  count = int(call.data.replace("set_ai_", ""))
-  ai_bot_count = count
-
-  generate_ai_bots(count)
-
-  msg = bot.send_message(
-      lobby_chat_id,
-      "⏳ Создание ИИ-лобби...",
-      parse_mode="Markdown",
-      reply_markup=get_lobby_keyboard(),
-  )
-  lobby_message_id = msg.message_id
-  update_lobby_message()
-
-
 @bot.message_handler(commands=["lobby"])
 def cmd_lobby(message):
-  global lobby_active, lobby_timer, lobby_chat_id, lobby_message_id, players, host_id, selected_roles, game_started, ai_bot_count
+  global lobby_active, lobby_timer, lobby_chat_id, lobby_message_id, players, host_id, selected_roles, game_started
+
+  if message.chat.type == "private":
+    bot.reply_to(message, "Эту команду можно использовать только в группе!")
+    return
 
   if game_started or lobby_active:
-    bot.reply_to(message, "⚠️ Игра уже идет!")
+    bot.reply_to(
+        message,
+        "⚠️ Игра уже идет или лобби открыто! Если игра зависла, напишите"
+        " `/reset`.",
+    )
     return
 
   players = {message.from_user.id: {"name": message.from_user.first_name}}
   selected_roles = DEFAULT_ROLES.copy()
   host_id = message.from_user.id
-  ai_bot_count = 0
   lobby_active = True
   lobby_timer = 120
   lobby_chat_id = message.chat.id
@@ -384,7 +212,26 @@ def cmd_lobby(message):
   update_lobby_message()
 
 
-# --- ОБРАБОТЧИК КНОПОК С ЗАЩИТОЙ ОТ ЗАВИСАНИЯ ---
+@bot.message_handler(commands=["reset"])
+def cmd_reset(message):
+  global lobby_active, game_started, players, roles_menu_open
+  lobby_active = False
+  game_started = False
+  roles_menu_open = False
+  players.clear()
+  bot.reply_to(
+      message,
+      "🔄 Состояние игры полностью сброшено! Теперь можно снова запустить"
+      " `/lobby`.",
+  )
+
+
+@bot.message_handler(commands=["ping"])
+def cmd_ping(message):
+  bot.reply_to(message, "🟢 Бот активен и работает стабильно!")
+
+
+# --- ОБРАБОТЧИК КНОПОК ---
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -413,56 +260,80 @@ def handle_clicks(call):
   elif call.data == "setup_roles":
     if uid != host_id:
       bot.answer_callback_query(
-          call.id, "⚠️ Только хост настраивает роли!", show_alert=True
+          call.id, "⚠️ Только создатель может настраивать роли!", show_alert=True
       )
       return
     roles_menu_open = True
-    bot.edit_message_text(
-        f"⚙️ **НАСТРОЙКА РОЛЕЙ** (Всего участников: {len(players)}):",
-        lobby_chat_id,
-        lobby_message_id,
-        parse_mode="Markdown",
-        reply_markup=get_roles_setup_keyboard(),
-    )
+    try:
+      bot.edit_message_text(
+          f"⚙️ **НАСТРОЙКА РОЛЕЙ** (Всего участников: {len(players)}):",
+          lobby_chat_id,
+          lobby_message_id,
+          parse_mode="Markdown",
+          reply_markup=get_roles_setup_keyboard(),
+      )
+    except Exception:
+      pass
 
   elif call.data.startswith("rp_"):
     r = call.data.replace("rp_", "")
     selected_roles[r] += 1
-    bot.edit_message_reply_markup(
-        lobby_chat_id, lobby_message_id, reply_markup=get_roles_setup_keyboard()
-    )
-
-  elif call.data.startswith("rm_"):
-    r = call.data.replace("rm_", "")
-    if selected_roles[r] > 0:
-      selected_roles[r] -= 1
+    try:
       bot.edit_message_reply_markup(
           lobby_chat_id,
           lobby_message_id,
           reply_markup=get_roles_setup_keyboard(),
       )
+    except Exception:
+      pass
+
+  elif call.data.startswith("rm_"):
+    r = call.data.replace("rm_", "")
+    if selected_roles[r] > 0:
+      selected_roles[r] -= 1
+      try:
+        bot.edit_message_reply_markup(
+            lobby_chat_id,
+            lobby_message_id,
+            reply_markup=get_roles_setup_keyboard(),
+        )
+      except Exception:
+        pass
 
   elif call.data == "roles_done":
     roles_menu_open = False
     update_lobby_message()
 
   elif call.data == "force_start":
+    if uid != host_id:
+      bot.answer_callback_query(
+          call.id, "⚠️ Только создатель может запустить игру!", show_alert=True
+      )
+      return
     start_game()
 
 
 setup_bot_commands()
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
 
-import os
+
+# ================= ВЕБ-СЕРВЕР ДЛЯ ОБЛАЧНОГО ХОСТИНГА (24/7) =================
 from flask import Flask
+import os
+import threading
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Bot is running!"
+    return "Mafia Bot is running 24/7!"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # Запускаем Flask в отдельном потоке, чтобы он не мешал боту
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
+    
+    # Запуск самого телеграм-бота
+    print("Бот запущен...")
+    bot.infinity_polling(skip_pending=True)
     
