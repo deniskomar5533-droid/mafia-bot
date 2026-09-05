@@ -1,6 +1,8 @@
+import os
 import random
 import threading
 import time
+from flask import Flask
 import telebot
 from telebot import types
 
@@ -46,7 +48,7 @@ def setup_bot_commands():
   commands = [
       telebot.types.BotCommand("lobby", "⚔️ Создать лобби мафии"),
       telebot.types.BotCommand("reset", "🔄 Сбросить зависшую игру"),
-      telebot.types.BotCommand("roles", "📜 Список участников"),
+      telebot.types.BotCommand("roles", "📜 Список участников и ролей"),
       telebot.types.BotCommand("will", "✉️ Написать завещание"),
       telebot.types.BotCommand("ping", "🟢 Проверка бота"),
   ]
@@ -127,6 +129,30 @@ def update_lobby_message():
     pass
 
 
+# --- ПОТОК ТАЙМЕРА ЛОББИ ---
+def lobby_timer_countdown():
+  global lobby_timer, lobby_active, lobby_chat_id, lobby_message_id, game_started
+  while lobby_active and lobby_timer > 0:
+    time.sleep(1)
+    if not lobby_active or game_started:
+      break
+    lobby_timer -= 1
+    update_lobby_message()
+
+  if lobby_active and lobby_timer <= 0:
+    lobby_active = False
+    if len(players) >= 3:
+      start_game()
+    else:
+      try:
+        bot.send_message(
+            lobby_chat_id,
+            "⏰ Время вышло, но участников меньше 3. Лобби закрыто.",
+        )
+      except Exception:
+        pass
+
+
 def start_game():
   global game_started, lobby_active, roles_menu_open
   total_roles = sum(selected_roles.values())
@@ -155,6 +181,7 @@ def start_game():
   for (uid, pdata), role in zip(players.items(), role_deck):
     pdata["role"] = role
     pdata["alive"] = True
+    pdata["will"] = ""
 
     try:
       bot.send_message(
@@ -211,6 +238,9 @@ def cmd_lobby(message):
   lobby_message_id = msg.message_id
   update_lobby_message()
 
+  # Запуск потока таймера
+  threading.Thread(target=lobby_timer_countdown, daemon=True).start()
+
 
 @bot.message_handler(commands=["reset"])
 def cmd_reset(message):
@@ -224,6 +254,65 @@ def cmd_reset(message):
       "🔄 Состояние игры полностью сброшено! Теперь можно снова запустить"
       " `/lobby`.",
   )
+
+
+@bot.message_handler(commands=["roles"])
+def cmd_show_roles(message):
+  p_list = (
+      "\n".join([
+          f"• {p['name']} — {p.get('role', 'Не распределена')}"
+          for p in players.values()
+      ])
+      if players
+      else "Лобби пустое."
+  )
+  bot.reply_to(
+      message,
+      f"📜 **Список участников и ролей:**\n\n{p_list}",
+      parse_mode="Markdown",
+  )
+
+
+@bot.message_handler(commands=["will"])
+def cmd_set_will(message):
+  if message.chat.type != "private":
+    bot.reply_to(
+        message,
+        "✉️ Пиши завещание мне в **личные сообщения**, чтобы другие игроки не"
+        " подсмотрели!",
+        parse_mode="Markdown",
+    )
+    return
+
+  uid = message.from_user.id
+  text_parts = message.text.split(maxsplit=1)
+
+  if len(text_parts) < 2:
+    bot.reply_to(
+        message,
+        "⚠️ Напиши текст завещания сразу после команды. Пример:\n`/will Я"
+        " считаю что мафия — это игрок`",
+        parse_mode="Markdown",
+    )
+    return
+
+  will_text = text_parts[1]
+  user_found = False
+
+  for p_id, pdata in players.items():
+    if str(p_id) == str(uid):
+      pdata["will"] = will_text
+      user_found = True
+      break
+
+  if user_found:
+    bot.reply_to(
+        message,
+        f"✅ Завещание успешно сохранено:\n_{will_text}_",
+        parse_mode="Markdown",
+    )
+  else:
+    bot.reply_to(message, "❌ Ты не находишься в активной игре!")
 
 
 @bot.message_handler(commands=["ping"])
@@ -296,9 +385,9 @@ def handle_clicks(call):
             lobby_chat_id,
             lobby_message_id,
             reply_markup=get_roles_setup_keyboard(),
-        )
-      except Exception:
-        pass
+      )
+    except Exception:
+      pass
 
   elif call.data == "roles_done":
     roles_menu_open = False
@@ -314,26 +403,23 @@ def handle_clicks(call):
 
 
 setup_bot_commands()
-bot.infinity_polling(skip_pending=True)
 
 
 # ================= ВЕБ-СЕРВЕР ДЛЯ ОБЛАЧНОГО ХОСТИНГА (24/7) =================
-from flask import Flask
-import os
-import threading
-
 app = Flask(__name__)
+
 
 @app.route("/")
 def home():
-    return "Mafia Bot is running 24/7!"
+  return "Mafia Bot is running 24/7!"
+
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    # Запускаем Flask в отдельном потоке, чтобы он не мешал боту
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    
-    # Запуск самого телеграм-бота
-    print("Бот запущен...")
-    bot.infinity_polling(skip_pending=True)
+  port = int(os.environ.get("PORT", 5000))
+  # Запускаем Flask в отдельном потоке, чтобы он не мешал боту
+  threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
+
+  # Запуск самого телеграм-бота
+  print("Бот запущен...")
+  bot.infinity_polling(skip_pending=True)
     
